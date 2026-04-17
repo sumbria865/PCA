@@ -40,7 +40,16 @@ app.use(cors({
 }))
 
 // Preflight support (VERY IMPORTANT)
-app.options('*', cors())
+app.options('*', cors({
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true)
+    return callback(null, true)
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}))
+
 
 // ========================
 // MIDDLEWARE
