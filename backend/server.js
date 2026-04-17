@@ -11,16 +11,28 @@ connectDB()
 
 // ✅ FIXED CORS
 app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'http://localhost:5174',
-    'http://localhost:5175',
-    'https://pca-4jpk.onrender.com'
-  ],
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  origin: function (origin, callback) {
+    const allowedOrigins = [
+      'http://localhost:5173',
+      'http://localhost:5174',
+      'http://localhost:5175',
+      'https://pca-4jpk.onrender.com'
+    ];
+
+    // allow requests with no origin (mobile apps, curl, postman)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      return callback(new Error('Blocked by CORS: ' + origin));
+    }
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
-}))
+}));
+app.options('*', cors());
 // Middleware
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true }))
