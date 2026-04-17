@@ -71,8 +71,8 @@ async function runPCA(analysisId, filePath, components, sampleSize) {
   try {
     const pythonScript = path.join(__dirname, '../../python/run_pca.py')
 
-    // ✅ Use correct Python executable
-    const pythonBin = "C:/Users/prink/AppData/Local/Programs/Python/Python313/python.exe"
+    // ✅ Use correct Python executable for both local and production
+    const pythonBin = process.env.NODE_ENV === 'production' ? 'python3' : "C:/Users/prink/AppData/Local/Programs/Python/Python313/python.exe"
 
     const args = [
       pythonScript,
