@@ -2,7 +2,7 @@ import axios from 'axios'
 
 // Base backend URL
 const api = axios.create({
-  baseURL: 'http://localhost:5000',
+baseURL: "https://web-service-pugo.onrender.com"
 })
 
 // 🔥 Attach token automatically for EVERY request
