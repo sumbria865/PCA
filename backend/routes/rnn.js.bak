@@ -1,0 +1,157 @@
+const express    = require('express')
+const multer     = require('multer')
+const path       = require('path')
+const fs         = require('fs')
+const { spawn }  = require('child_process')
+const auth       = require('../middleware/auth')
+const RNNModel   = require('../models/RNNModel')
+
+const router = express.Router()
+
+// ── Multer ───────────────────────────────────────────────────────────────
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, '../uploads')
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    cb(null, dir)
+  },
+  filename: (req, file, cb) => cb(null, `rnn-${Date.now()}-${file.originalname}`)
+})
+const upload = multer({
+  storage,
+  limits: { fileSize: 300 * 1024 * 1024 },
+  fileFilter: (_, file, cb) => {
+    const ok = ['.csv', '.zip'].includes(path.extname(file.originalname).toLowerCase())
+    ok ? cb(null, true) : cb(new Error('Only .csv / .zip'))
+  }
+})
+
+// ── POST /api/rnn/train  ─────────────────────────────────────────────────
+router.post('/train', auth, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'No file uploaded' })
+
+    const {
+      pcaComponents     = '0',
+      varianceThreshold = '0.85',
+      sampleSize        = '10000',
+      epochs            = '30',
+      batchSize         = '64',
+      lstmUnits         = '64',
+      dropoutRate       = '0.3',
+    } = req.body
+
+    const doc = await RNNModel.create({
+      userId:             req.user._id,
+      filename:           req.file.originalname,
+      pcaComponentsInput: parseInt(pcaComponents),
+      varianceThreshold:  parseFloat(varianceThreshold),
+      sampleSize:         parseInt(sampleSize),
+      epochs:             parseInt(epochs),
+      batchSize:          parseInt(batchSize),
+      lstmUnits:          parseInt(lstmUnits),
+      dropoutRate:        parseFloat(dropoutRate),
+      status:             'pending',
+    })
+
+    res.status(201).json({ rnnId: doc._id, message: 'Training started' })
+
+    // spawn Python async
+    _spawnRNN(doc._id.toString(), req.file.path, {
+      pcaComponents, varianceThreshold, sampleSize,
+      epochs, batchSize, lstmUnits, dropoutRate,
+    })
+
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
+
+// ── GET /api/rnn/history  ────────────────────────────────────────────────
+router.get('/history', auth, async (req, res) => {
+  try {
+    const list = await RNNModel.find(
+      { userId: req.user._id },
+      'filename status testAccuracy macroF1 epochs sampleSize pcaComponents createdAt'
+    ).sort({ createdAt: -1 }).limit(20)
+    res.json(list)
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
+
+// ── GET /api/rnn/:id/status  — live polling ─────────────────────────────
+router.get('/:id/status', auth, async (req, res) => {
+  try {
+    const doc = await RNNModel.findOne(
+      { _id: req.params.id, userId: req.user._id },
+      'status trainingProgress currentEpoch liveMetrics trainingHistory logs errorMessage'
+    )
+    if (!doc) return res.status(404).json({ message: 'Not found' })
+    res.json(doc)
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
+
+// ── GET /api/rnn/:id/result  — full results ──────────────────────────────
+router.get('/:id/result', auth, async (req, res) => {
+  try {
+    const doc = await RNNModel.findOne({ _id: req.params.id, userId: req.user._id })
+    if (!doc) return res.status(404).json({ message: 'Not found' })
+    if (doc.status !== 'completed')
+      return res.status(400).json({ message: 'Not completed yet', status: doc.status })
+    res.json(doc)
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
+
+// ── DELETE /api/rnn/:id  ─────────────────────────────────────────────────
+router.delete('/:id', auth, async (req, res) => {
+  try {
+    await RNNModel.findOneAndDelete({ _id: req.params.id, userId: req.user._id })
+    res.json({ message: 'Deleted' })
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
+
+// ── Internal: spawn Python ───────────────────────────────────────────────
+function _spawnRNN(rnnId, filePath, cfg) {
+  const script    = path.join(__dirname, '../../python/run_rnn.py')
+  const pythonBin = process.env.PYTHON_PATH || 'python3'
+
+  const args = [
+    script,
+    '--rnn-id',             rnnId,
+    '--file',               filePath,
+    '--pca-components',     cfg.pcaComponents,
+    '--variance-threshold', cfg.varianceThreshold,
+    '--sample-size',        cfg.sampleSize,
+    '--epochs',             cfg.epochs,
+    '--batch-size',         cfg.batchSize,
+    '--lstm-units',         cfg.lstmUnits,
+    '--dropout',            cfg.dropoutRate,
+    '--mongo-uri',          process.env.MONGODB_URI,
+  ]
+
+  const py = spawn(pythonBin, args)
+  py.stdout.on('data', d => console.log(`[RNN ${rnnId}]`, d.toString().trim()))
+  py.stderr.on('data', d => console.error(`[RNN ERR ${rnnId}]`, d.toString().trim()))
+  py.on('close', async code => {
+    try {
+      if (code !== 0) {
+        await RNNModel.findByIdAndUpdate(rnnId, {
+          status: 'failed',
+          errorMessage: `Python exited with code ${code}`,
+        })
+      }
+    } catch (err) {
+      console.error(`[RNN ${rnnId}] Error updating status:`, err.message)
+    }
+    try { fs.unlinkSync(filePath) } catch {}
+  })
+}
+
+module.exports = router

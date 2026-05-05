@@ -6,90 +6,28 @@ const connectDB = require('./config/db')
 
 const app = express()
 
-// ========================
-// DB CONNECTION
-// ========================
+// Connect DB
 connectDB()
 
-// ========================
-// CORS CONFIG (FIXED)
-// ========================
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:5174',
-  'http://localhost:5175',
-  'https://pca-4jpk.onrender.com',
-  'https://pca-8k9y.onrender.com'
-]
-
-app.use(cors({
-  origin: function (origin, callback) {
-    // allow tools like Postman / server-to-server
-    if (!origin) return callback(null, true)
-
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true)
-    }
-
-    // IMPORTANT: do NOT block hard (prevents Render CORS failures)
-    return callback(null, true)
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}))
-
-// Preflight support (VERY IMPORTANT)
-app.options('*', cors({
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true)
-    return callback(null, true)
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}))
-
-
-// ========================
-// MIDDLEWARE
-// ========================
+// Middleware
+app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:5174'], credentials: true })) // updated for dev ports
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true }))
 
-// ========================
-// ROUTES
-// ========================
-app.use('/api/auth', require('./routes/auth'))
-app.use('/api/upload', require('./routes/upload'))
+// Routes
+app.use('/api/auth',     require('./routes/auth'))
+app.use('/api/upload',   require('./routes/upload'))
 app.use('/api/analysis', require('./routes/analysis'))
-app.use('/api/notebook', require('./routes/notebook'))
+app.use('/api/rnn',      require('./routes/rnn'))
 
-// ========================
-// HEALTH CHECK
-// ========================
-app.get('/api/health', (_, res) =>
-  res.json({ status: 'ok', time: new Date() })
-)
+// Health check
+app.get('/api/health', (_, res) => res.json({ status: 'ok', time: new Date() }))
 
-// ========================
-// PRODUCTION FRONTEND SERVE
-// ========================
+// Production: serve React build
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../frontend/dist')))
-
-  app.get('*', (_, res) => {
-    res.sendFile(path.join(__dirname, '../frontend/dist/index.html'))
-  })
+  app.get('*', (_, res) => res.sendFile(path.join(__dirname, '../frontend/dist/index.html')))
 }
 
-// ========================
-// START SERVER
-// ========================
 const PORT = process.env.PORT || 5000
-app.listen(PORT, () =>
-  console.log(`🚀 Server running on http://localhost:${PORT}`)
-)
-
-// DEBUG
-console.log("ENV CHECK:", process.env.MONGO_URI)
+app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`))
